@@ -1,0 +1,45 @@
+FROM python:3.9-alpine as base
+RUN adduser \
+  --disabled-password \
+  --home /app \
+  --gecos '' app \
+  && chown -R app /app
+
+USER root
+RUN python -m pip install --upgrade pip
+
+RUN apk add --no-cache bash icu-libs krb5-libs libgcc libintl libssl1.1 libstdc++ zlib wget
+RUN wget https://dot.net/v1/dotnet-install.sh -O ~/dotnet-install.sh
+RUN chmod +x ~/dotnet-install.sh
+RUN ~/dotnet-install.sh -c 6.0 --runtime aspnetcore --no-cdn --install-dir /dotnet
+RUN rm -f ~/dotnet-install.sh
+
+USER app
+
+ENV PATH "$PATH:/dotnet"
+ENV ASPNETCORE_URLS=https://+:8080
+EXPOSE 8080
+ENTRYPOINT [ "dotnet", "help" ]
+
+
+FROM base as builder
+USER root
+
+RUN apk add --no-cache musl-dev gcc build-base libpng-dev openblas-dev
+
+WORKDIR /root
+COPY ./requirements.txt ./
+RUN pip wheel --no-cache-dir -r requirements.txt -w ./wheels
+
+
+FROM base
+USER root
+RUN apk add --no-cache libpng openblas
+
+COPY --from=builder /root/wheels /app/wheels/
+COPY ./requirements.txt /app/
+RUN pip install --no-index -r /app/requirements.txt --find-links /app/wheels \
+  && rm -Rf /app/wheels\
+  && rm -f /app/requirements.txt
+
+USER app
